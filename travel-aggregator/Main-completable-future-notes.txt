@@ -1,0 +1,87 @@
+import java.util.concurrent.CompletableFuture;
+
+// how Thread.currentThread() works
+// The Mechanism: When you call Thread.currentThread(), Java looks at whichever thread is currently executing that specific line of code and returns that specific Thread object.
+// The Chain: Once you have that object, you can immediately call its instance method, .getName(), to see its name.
+// What Java does behind the scenes:
+// Thread current = Thread.currentThread(); // Gets the active thread object
+// String name = current.getName();        // Gets its name ("main", "worker-1", etc.)
+public class Main2 {
+
+    public static double fetchFlightPrice() {
+        try {
+            Thread.sleep(2000);
+        } catch(InterruptedException e) {
+            System.out.println("[" + Thread.currentThread().getName() + "] Fetched flight price");
+            return 400.0;
+        }
+    }
+
+    public static double fetchHotelPrice() {
+        try {
+            Thread.sleep(1500);
+        } catch (InterruptedException e) {
+            System.out.println("[" + Thread.currentThread.getName() + "] Fetched hotel price");
+            return 250.00;
+        }
+
+    }
+
+
+
+    public static void main(String[] args) {
+        long startTime = System.currentTimeMillis();
+
+        CompletableFuture<Double> flightFuture = CompletableFuture.supplyAsync(() -> fetchFlightPrice());
+        CompletableFuture<Double> hotelFuture = CompletableFuture.supplyAsync(() -> fetchHotelPrice());
+
+        // when you chain .thenCombine(), you are setting up an event listenenr. You are telling the JVM:
+//             Wait for flightFuture to finish its background work.
+// Wait for hotelFuture to finish its background work.
+// The moment both are done, take the resulting numbers (400.00 and 250.00) and automatically inject them into the variables you named in your lambda: (flightPrice, hotelPrice).
+// You don't need to manually store them in variables beforehand because CompletableFuture acts as the container holding those values until they are ready.
+        CompletableFuture<Double> combinedFuture = flightFuture.thenCombine(hotelFuture, (flightPrice, hotelPrice) -> {
+            double total = flightPrice +  hotelPrice;
+            System.out.println("Total package price: $" + total);
+            return total; //we return total because the lambda function inside .thenCombine() has its own return type, which is completely independent of the main methods vois return type.
+        }
+
+//🔍 Breaking Down the Return Chain
+Here is exactly why that return total; matters:
+1. The Lambda Contract
+The .thenCombine() method expects you to provide a function that takes two inputs and outputs a new result. Because you specified CompletableFuture<Double> combinedFuture, the lambda function inside must return a Double.
+2. Passing the Torch
+If you don't return total, the combined future doesn't know what its final value is supposed to be. Returning total hands that value over to combinedFuture so you can use it later in your program.
+
+
+💡 What happens if you don't return?
+If you try to remove return total;, your code will fail to compile. The Java compiler will complain that you are trying to provide a function that returns nothing (void) when it explicitly requires a function that returns a Double.
+Shortcut: Implicit Returns
+If you remove the curly braces {} and the print statement, Java lets you write a single-line lambda where the return is implicit (implied automatically):
+java
+// No 'return' keyword needed here; Java automatically returns the sum!
+CompletableFuture<Double> combinedFuture = flightFuture.thenCombine(hotelFuture, 
+    (flightPrice, hotelPrice) -> flightPrice + hotelPrice
+);
+Use code with caution.
+Since you wanted to print the total inside the pipeline, you had to use curly braces {}, which requires the explicit return keyword.
+
+
+
+        );
+        combinedFuture.join(); // this method tells the main thread:  "Freeze right here and wait until the background threads finish their work."
+        // If you completely remove join(), this is what happens:
+// The main thread triggers the background tasks.
+// The main thread instantly moves to the next lines of code without waiting.
+// It prints Total execution time: 1 ms.
+// The main method ends, and the JVM shuts down completely, killing the background threads before they even finish their sleep timers. You will never see the prices print.
+// Why did we move it above endTime?
+// In your original version, endTime was calculated immediately after setting up the pipeline. If left there, your total execution time would print as 0 ms or 1 ms because the main thread hasn't actually waited for the 2-second background tasks to complete yet. Moving join() above endTime ensures you measure the actual parallel runtime.
+
+        long endTime = System.currentTimeMillis();
+        System.out.println("Total execution time: " + (endTime - startTime) + " ms");
+    }
+}
+
+// Yes, your understanding is 100% accurate!
+// You hit the nail on the head. The join() method acts exactly like a synchronization barrier. Because you are waiting for both results to combine them, your pipeline is strictly bound by the slowest individual task (the 2000ms flight API).
